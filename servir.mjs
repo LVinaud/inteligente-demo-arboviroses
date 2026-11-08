@@ -16,15 +16,27 @@ const TIPOS = {
   ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".woff2": "font/woff2", ".txt": "text/plain; charset=utf-8",
 };
 
-const arquivo = (relativo) => {
-  const alvo = path.join(PASTA, relativo);
-  if (!alvo.startsWith(PASTA)) return null;
+const tipo = (alvo) => {
   try {
     const info = statSync(alvo);
-    if (info.isFile()) return alvo;
-    if (info.isDirectory()) return arquivo(path.join(relativo, "index.html"));
-  } catch {}
-  return null;
+    return info.isFile() ? "arquivo" : info.isDirectory() ? "pasta" : null;
+  } catch {
+    return null;
+  }
+};
+
+// Como o GitHub Pages: arquivo; pasta sem barra -> 301 para a pasta com barra; pasta com
+// barra -> index.html; /x -> x.html.
+const resolver = (relativo) => {
+  const alvo = path.join(PASTA, relativo);
+  if (!alvo.startsWith(PASTA)) return null;
+  const achado = tipo(alvo);
+  if (achado === "arquivo") return { arquivo: alvo };
+  if (achado === "pasta") {
+    if (relativo && !relativo.endsWith("/")) return { redirecionar: true };
+    return tipo(path.join(alvo, "index.html")) === "arquivo" ? { arquivo: path.join(alvo, "index.html") } : null;
+  }
+  return tipo(`${alvo}.html`) === "arquivo" ? { arquivo: `${alvo}.html` } : null;
 };
 
 createServer((req, res) => {
@@ -33,7 +45,12 @@ createServer((req, res) => {
     res.writeHead(301, { Location: PREFIXO }).end();
     return;
   }
-  const encontrado = caminho.startsWith(PREFIXO) ? arquivo(caminho.slice(PREFIXO.length)) : null;
+  const resolvido = caminho.startsWith(PREFIXO) ? resolver(caminho.slice(PREFIXO.length)) : null;
+  if (resolvido?.redirecionar) {
+    res.writeHead(301, { Location: `${caminho}/` }).end();
+    return;
+  }
+  const encontrado = resolvido?.arquivo;
   const servido = encontrado || path.join(PASTA, "404.html");
   // O GitHub Pages manda cache de 10 minutos; aqui também, para o teste medir algo parecido.
   res.writeHead(encontrado ? 200 : 404, {
